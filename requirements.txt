@@ -1,2 +1,5 @@
-streamlit
 openai
+whisper
+gtts
+streamlit
+groq
