@@ -1,5 +1,5 @@
 import os
-import whisper
+import openai_whisper as whisper
 from groq import Groq
 from gtts import gTTS
 import streamlit as st
