@@ -1,56 +1,68 @@
+import os
+import whisper
+from groq import Groq
+from gtts import gTTS
 import streamlit as st
-from openai import OpenAI
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+# Load Whisper model for speech-to-text
+whisper_model = whisper.load_model("base")
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Initialize Groq client with your API key
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Function to get response from Groq LLM
+def get_response_from_groq(user_input):
+    chat_completion = client.chat.completions.create(
+        messages=[{"role": "user", "content": user_input}],
+        model="llama3-8b-8192",
+    )
+    return chat_completion.choices[0].message.content
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Function to convert text to speech using Google TTS
+def text_to_speech(text):
+    tts = gTTS(text=text, lang='en')
+    response_audio_path = "response.mp3"
+    tts.save(response_audio_path)
+    return response_audio_path
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# Main function for voice-chat interaction
+def voice_chat(audio):
+    # Step 1: Convert audio to text using Whisper
+    transcription = whisper_model.transcribe(audio)["text"]
+    
+    # Step 2: Get LLM response using Groq API
+    response_text = get_response_from_groq(transcription)
+    
+    # Step 3: Convert response text to speech
+    response_audio = text_to_speech(response_text)
+    
+    return response_text, response_audio
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Streamlit interface
+st.title("Real-time Voice-to-Voice Chatbot")
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# Upload audio file
+audio_file = st.file_uploader("Upload an audio file", type=["mp3", "wav", "m4a"])
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+if audio_file is not None:
+    st.audio(audio_file, format="audio/wav")
+    
+    # Process the audio when the button is pressed
+    if st.button("Chat"):
+        # Step 1: Save uploaded audio temporarily for Whisper processing
+        with open("temp_audio.wav", "wb") as f:
+            f.write(audio_file.getbuffer())
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Step 2: Process the audio
+        response_text, response_audio = voice_chat("temp_audio.wav")
+        
+        # Display the transcription and LLM response
+        st.subheader("Transcription:")
+        st.text(response_text)
+        
+        # Step 3: Play the response audio
+        st.subheader("Response:")
+        st.audio(response_audio, format="audio/mp3")
+
+        # Clean up the temporary audio file
+        os.remove("temp_audio.wav")
